@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gully Ledger — Local Cricket Scorecard</title>
+<meta name="description" content="Build and run a scorecard for your local tennis-ball or gully cricket match — right from your phone." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- ===================== THEME TOGGLE (floodlight switch, persists) ===================== -->
+<button class="theme-toggle" id="btnThemeToggle" type="button" aria-label="Toggle day/night mode" title="Day / night mode">
+  <span class="tt-track">
+    <span class="tt-beam"></span>
+    <span class="tt-knob"><span class="tt-icon" id="ttIcon">☀️</span></span>
+  </span>
+</button>
+
+<!-- ===================== ENTRANCE CINEMATIC (first load only) ===================== -->
+<div class="entrance-overlay" id="entranceOverlay">
+  <div class="entrance-bokeh"></div>
+  <div class="entrance-ball"></div>
+  <div class="entrance-crack"></div>
+  <div class="entrance-word" id="entranceWord"></div>
+  <div class="entrance-skip">Tap to skip</div>
+</div>
+
+<div id="app">
+
+  <!-- ===================== ACCOUNT BAR ===================== -->
+  <div id="accountBar" class="account-bar hidden">
+    <span id="accountIdentity"></span>
+    <button class="btn-signout" id="btnSignOut">Sign out</button>
+  </div>
+
+  <!-- ===================== SCREEN: ROLE SELECT (new front door) ===================== -->
+  <section id="screen-role" class="screen">
+    <div class="ledger-card hero-card">
+      <p class="eyebrow">tennis-ball &amp; gully cricket</p>
+      <h1 class="display-xl">Gully<br/>Ledger</h1>
+      <p class="lede">Are you scoring this match, or just here to watch?</p>
+      <button class="btn btn-primary" id="btnRoleAdmin">I'm scoring — Admin login</button>
+      <button class="btn btn-ghost" id="btnRoleViewer">Just viewing — live score &amp; past scorecards</button>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN: AUTH (Email OTP only) ===================== -->
+  <section id="screen-auth" class="screen hidden">
+    <div class="ledger-card hero-card">
+      <p class="eyebrow">tennis-ball &amp; gully cricket</p>
+      <h1 class="display-xl">Gully<br/>Ledger</h1>
+      <p class="lede">Sign in with your email to score your matches and keep every scorecard saved to your account.</p>
+
+      <label class="field">
+        <span>Email</span>
+        <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" inputmode="email" />
+      </label>
+      <button class="btn btn-primary" id="btnSendOtp">Send OTP</button>
+
+      <div id="otpRow" class="hidden">
+        <label class="field">
+          <span>Enter verification code</span>
+          <input type="text" id="authOtp" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code" />
+        </label>
+        <button class="btn btn-primary" id="btnVerifyOtp">Verify OTP</button>
+        <button class="btn btn-ghost" id="btnResendOtp" disabled>Resend OTP</button>
+      </div>
+
+      <p class="hint" id="authHint">Checking your session…</p>
+      <button class="btn btn-ghost" id="btnAuthBack">← Back</button>
+    </div>
+  </section>
+
+  <!-- ===================== HEADER / SCOREBOARD ===================== -->
+  <header id="scoreboard" class="hidden">
+    <div class="scoreboard-inner">
+      <div class="sb-row sb-top">
+        <span class="sb-match-name" id="sbMatchName">Match</span>
+        <span class="sb-badge" id="sbFreeHit">FREE HIT</span>
+      </div>
+      <div class="sb-row sb-main">
+        <div class="sb-team" id="sbBattingTeam">TEAM A</div>
+        <div class="flip-score" id="flipScore">
+          <div class="flip-group" id="flipRuns"></div>
+          <span class="flip-sep">/</span>
+          <div class="flip-group" id="flipWkts"></div>
+        </div>
+        <div class="sb-overs">
+          <span id="sbOvers">0.0</span>
+          <small>overs</small>
+        </div>
+      </div>
+      <div class="sb-row sb-sub">
+        <span id="sbCRR">CRR 0.00</span>
+        <span id="sbThisOver" class="sb-this-over"></span>
+        <span id="sbTarget"></span>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ===================== SCREEN: LANDING / RESUME ===================== -->
+    <section id="screen-landing" class="screen hidden">
+      <div class="ledger-card hero-card">
+        <p class="eyebrow">tennis-ball &amp; gully cricket</p>
+        <h1 class="display-xl">Gully<br/>Ledger</h1>
+        <p class="lede">Set your XI, pick your overs, score ball by ball — and send the full card to the group chat when stumps are drawn.</p>
+        <button class="btn btn-primary" id="btnNewMatch">Start a new match</button>
+      </div>
+
+      <div class="ledger-card" id="myMatchesCard">
+        <p class="eyebrow">your matches</p>
+        <h2 class="display-sm">Saved to your account</h2>
+        <ul class="match-list" id="myMatchesList"></ul>
+        <p class="hint" id="myMatchesHint"></p>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: VIEWER — MATCH LIST (no login) ===================== -->
+    <section id="screen-viewer-list" class="screen hidden">
+      <div class="ledger-card hero-card">
+        <p class="eyebrow">tennis-ball &amp; gully cricket</p>
+        <h1 class="display-xl">Gully<br/>Ledger</h1>
+        <p class="lede">Watch live scores and browse completed scorecards — no sign-in needed.</p>
+        <button class="btn btn-ghost" id="btnViewerBack">← Back</button>
+      </div>
+
+      <div class="ledger-card">
+        <p class="eyebrow">live now</p>
+        <h2 class="display-sm">In progress</h2>
+        <ul class="match-list" id="viewerLiveList"></ul>
+        <p class="hint" id="viewerLiveHint"></p>
+      </div>
+
+      <div class="ledger-card">
+        <p class="eyebrow">scorecards</p>
+        <h2 class="display-sm">Completed matches</h2>
+        <ul class="match-list" id="viewerCompletedList"></ul>
+        <p class="hint" id="viewerCompletedHint"></p>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: VIEWER — LIVE MATCH (no login) ===================== -->
+    <section id="screen-viewer-live" class="screen hidden">
+      <div class="ledger-card">
+        <p class="eyebrow">watching live<span id="viewerLiveStatus"></span></p>
+        <h2 class="display-sm" id="viewerLiveMatchName">Match</h2>
+
+        <div class="batters-block">
+          <div class="batter-row">
+            <span class="dot-strike">●</span>
+            <span class="batter-name" id="vwStriker">—</span>
+            <span class="batter-stats" id="vwStrikerStats">0 (0)</span>
+          </div>
+          <div class="batter-row">
+            <span class="dot-strike dim">●</span>
+            <span class="batter-name" id="vwNonStriker">—</span>
+            <span class="batter-stats" id="vwNonStrikerStats">0 (0)</span>
+          </div>
+          <div class="batter-row bowler-row">
+            <span class="dot-strike ball">○</span>
+            <span class="batter-name" id="vwBowler">—</span>
+            <span class="batter-stats" id="vwBowlerStats">0-0-0</span>
+          </div>
+        </div>
+
+        <p class="col-label">This over</p>
+        <div class="over-track" id="vwOverTrack"></div>
+
+        <button class="btn btn-ghost" id="btnViewerLiveBack">← Back to matches</button>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: VIEWER — SCORECARD (no login) ===================== -->
+    <section id="screen-viewer-scorecard" class="screen hidden">
+      <div class="ledger-card">
+        <p class="eyebrow">scorecard</p>
+        <h2 class="display-md" id="viewerScorecardHeadline">Result</h2>
+        <div id="viewerScorecardBody" class="scorecard-block"></div>
+        <button class="btn btn-ghost" id="btnViewerScorecardBack">← Back to matches</button>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: SETUP ===================== -->
+    <section id="screen-setup" class="screen hidden">
+      <div class="ledger-card">
+        <p class="eyebrow">step 1 of 3</p>
+        <h2 class="display-md">Set the match</h2>
+
+        <label class="field">
+          <span>Match name</span>
+          <input type="text" id="inMatchName" placeholder="Sunday Gully Cup — Ground 2" />
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Team A name</span>
+            <input type="text" id="inTeamA" placeholder="Tape Ball Tigers" />
+          </label>
+          <label class="field">
+            <span>Team B name</span>
+            <input type="text" id="inTeamB" placeholder="Chowk Chargers" />
+          </label>
+        </div>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Overs per side</span>
+            <input type="number" id="inOvers" min="1" max="50" value="10" />
+          </label>
+          <label class="field">
+            <span>Max overs / bowler</span>
+            <input type="number" id="inMaxOvers" min="1" max="20" value="2" />
+          </label>
+        </div>
+
+        <div class="players-block">
+          <div class="players-col">
+            <p class="col-label" id="labelTeamAPlayers">Team A players</p>
+            <div class="player-add-row">
+              <input type="text" id="inPlayerA" placeholder="Add player name" />
+              <button class="btn btn-small" id="btnAddPlayerA">Add</button>
+            </div>
+            <ul class="player-list" id="listTeamA"></ul>
+          </div>
+          <div class="players-col">
+            <p class="col-label" id="labelTeamBPlayers">Team B players</p>
+            <div class="player-add-row">
+              <input type="text" id="inPlayerB" placeholder="Add player name" />
+              <button class="btn btn-small" id="btnAddPlayerB">Add</button>
+            </div>
+            <ul class="player-list" id="listTeamB"></ul>
+          </div>
+        </div>
+
+        <p class="hint" id="setupHint"></p>
+        <button class="btn btn-primary" id="btnToToss">Next: the toss</button>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: TOSS ===================== -->
+    <section id="screen-toss" class="screen hidden">
+      <div class="ledger-card">
+        <p class="eyebrow">step 2 of 3</p>
+        <h2 class="display-md">Who's batting first?</h2>
+        <p class="lede" id="tossLede">Flip a coin at the ground, then record it here.</p>
+        <div class="toss-choice" id="tossChoice"></div>
+        <button class="btn btn-ghost" id="btnBackSetup">Back</button>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: OPENERS / NEW BOWLER MODAL TARGETS ===================== -->
+    <section id="screen-scoring" class="screen hidden">
+
+      <div class="ledger-card">
+        <p class="eyebrow" id="inningsLabel">1st innings</p>
+
+        <div class="batters-block">
+          <div class="batter-row" id="rowStriker">
+            <span class="dot-strike">●</span>
+            <span class="batter-name" id="nameStriker">—</span>
+            <span class="batter-stats" id="statsStriker">0 (0)</span>
+          </div>
+          <div class="batter-row" id="rowNonStriker">
+            <span class="dot-strike dim">●</span>
+            <span class="batter-name" id="nameNonStriker">—</span>
+            <span class="batter-stats" id="statsNonStriker">0 (0)</span>
+          </div>
+          <div class="batter-row bowler-row">
+            <span class="dot-strike ball">○</span>
+            <span class="batter-name" id="nameBowler">—</span>
+            <span class="batter-stats" id="statsBowler">0-0-0</span>
+          </div>
+        </div>
+
+        <div class="over-track" id="overTrack"></div>
+
+        <div class="controls">
+          <p class="col-label">Runs off the bat</p>
+          <div class="btn-grid runs-grid">
+            <button class="btn btn-run" data-run="0">0</button>
+            <button class="btn btn-run" data-run="1">1</button>
+            <button class="btn btn-run" data-run="2">2</button>
+            <button class="btn btn-run" data-run="3">3</button>
+            <button class="btn btn-run boundary" data-run="4">4</button>
+            <button class="btn btn-run boundary six" data-run="6">6</button>
+          </div>
+
+          <p class="col-label">Extras</p>
+          <div class="btn-grid extras-grid">
+            <button class="btn btn-extra" id="btnWide">Wide</button>
+            <button class="btn btn-extra" id="btnNoBall">No Ball</button>
+            <button class="btn btn-extra" id="btnBye">Bye</button>
+            <button class="btn btn-extra" id="btnLegBye">Leg Bye</button>
+          </div>
+
+          <div class="btn-grid action-grid">
+            <button class="btn btn-wicket" id="btnWicket">Wicket</button>
+            <button class="btn btn-undo" id="btnUndo">Undo last ball</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: INNINGS BREAK ===================== -->
+    <section id="screen-break" class="screen hidden">
+      <div class="ledger-card">
+        <p class="eyebrow">innings complete</p>
+        <h2 class="display-md" id="breakHeadline">Innings break</h2>
+        <p class="lede" id="breakSummary"></p>
+        <div id="breakScorecard" class="scorecard-block"></div>
+        <button class="btn btn-primary" id="btnStartSecondInnings">Start 2nd innings</button>
+      </div>
+    </section>
+
+    <!-- ===================== SCREEN: RESULT ===================== -->
+    <section id="screen-result" class="screen hidden">
+      <div class="ledger-card">
+        <p class="eyebrow">stumps drawn</p>
+        <h2 class="display-md" id="resultHeadline">Result</h2>
+        <div id="resultScorecard" class="scorecard-block"></div>
+        <button class="btn btn-primary" id="btnCopyCard">Copy scorecard for the group chat</button>
+        <button class="btn btn-ghost" id="btnFreshMatch">Back to my matches</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===================== MODAL: NEW BOWLER ===================== -->
+<div class="modal-backdrop hidden" id="modalBowler">
+  <div class="modal-card">
+    <p class="eyebrow">over complete</p>
+    <h3 class="display-sm">Who's bowling next?</h3>
+    <p class="hint" id="bowlerWarning"></p>
+    <select id="selectBowler" class="select"></select>
+    <button class="btn btn-primary" id="btnConfirmBowler">Confirm bowler</button>
+  </div>
+</div>
+
+<!-- ===================== MODAL: WICKET ===================== -->
+<div class="modal-backdrop hidden" id="modalWicket">
+  <div class="modal-card">
+    <p class="eyebrow">out!</p>
+    <h3 class="display-sm">How, and who?</h3>
+    <label class="field">
+      <span>Batter dismissed</span>
+      <select id="selectOutBatter" class="select"></select>
+    </label>
+    <label class="field">
+      <span>How out</span>
+      <select id="selectDismissal" class="select">
+        <option value="Bowled">Bowled</option>
+        <option value="Caught">Caught</option>
+        <option value="Run Out">Run Out</option>
+        <option value="Stumped">Stumped</option>
+        <option value="Hit Wicket">Hit Wicket</option>
+        <option value="Retired">Retired</option>
+      </select>
+    </label>
+    <p class="hint" id="freeHitDismissHint"></p>
+    <label class="field" id="rowNewBatter">
+      <span>Next batter in</span>
+      <select id="selectNewBatter" class="select"></select>
+    </label>
+    <button class="btn btn-primary" id="btnConfirmWicket">Confirm dismissal</button>
+    <button class="btn btn-ghost" id="btnCancelWicket">Cancel</button>
+  </div>
+</div>
+
+<!-- ===================== MODAL: BYE/LEGBYE RUNS ===================== -->
+<div class="modal-backdrop hidden" id="modalByeRuns">
+  <div class="modal-card">
+    <p class="eyebrow" id="byeModalLabel">Bye</p>
+    <h3 class="display-sm">How many run?</h3>
+    <div class="btn-grid runs-grid">
+      <button class="btn btn-run" data-byerun="1">1</button>
+      <button class="btn btn-run" data-byerun="2">2</button>
+      <button class="btn btn-run" data-byerun="3">3</button>
+      <button class="btn btn-run" data-byerun="4">4</button>
+    </div>
+    <button class="btn btn-ghost" id="btnCancelBye">Cancel</button>
+  </div>
+</div>
+
+<!-- ===================== MODAL: OPENERS ===================== -->
+<div class="modal-backdrop hidden" id="modalOpeners">
+  <div class="modal-card">
+    <p class="eyebrow" id="openersEyebrow">new innings</p>
+    <h3 class="display-sm">Set the openers</h3>
+    <label class="field">
+      <span>Striker</span>
+      <select id="selectStriker" class="select"></select>
+    </label>
+    <label class="field">
+      <span>Non-striker</span>
+      <select id="selectNonStriker" class="select"></select>
+    </label>
+    <label class="field">
+      <span>Opening bowler</span>
+      <select id="selectOpeningBowler" class="select"></select>
+    </label>
+    <button class="btn btn-primary" id="btnConfirmOpeners">Play ball</button>
+  </div>
+</div>
+
+<div class="celebrate-overlay hidden" id="celebrateOverlay"></div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
